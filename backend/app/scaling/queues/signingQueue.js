@@ -7,4 +7,9 @@ const connection = new IORedis({
   maxRetriesPerRequest: null,
 });
 
-export const signingQueue = new Queue('signing', { connection });
+export const signingQueue = new Queue('signing', { connection,
+    defaultJobOptions: {
+    removeOnComplete: true,
+    removeOnFail: { count: 5 },
+  },
+});

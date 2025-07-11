@@ -288,7 +288,6 @@ export const printRequest = async (req, res, next) => {
       return res.status(404).json({ error: 'No signed PDFs available' });
     }
 
-    // Merge all PDFs
     const mergedPdf = await PDFDocument.create();
     for (const file of signedFiles) {
       const pdfPath = path.join(signedDir, file);

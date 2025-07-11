@@ -64,6 +64,12 @@ export const uploadDocuments = async (req, res, next) => {
     if (!request) {
       return res.status(404).json({ error: 'Request not found or unauthorized' });
     }
+    if( request.data.length >= 10) {
+      return res.status(400).json({ error: 'Maximum 10 documents allowed' });
+    }
+    if( request.signStatus !== signStatus.unsigned) {
+      return res.status(400).json({ error: 'Request is not in unsigned status' });
+    }
 
     const dataEntries = req.body.dataEntries ? JSON.parse(req.body.dataEntries) : [];
 
@@ -100,7 +106,6 @@ export const uploadDocuments = async (req, res, next) => {
         },
       }
     );
-
     return res.json({
       id: updatedTemplate.id.toString(),
       title: updatedTemplate.templateName,

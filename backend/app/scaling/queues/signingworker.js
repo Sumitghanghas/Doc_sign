@@ -1,6 +1,6 @@
-// queues/signingWorker.js
-import { Worker, QueueEvents } from 'bullmq';
+import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
+import PQueue from 'p-queue';
 import { signJobHandler } from '../jobs/signingJobHandler.js';
 
 const connection = new IORedis({
@@ -9,37 +9,34 @@ const connection = new IORedis({
   maxRetriesPerRequest: null,
 });
 
-// Ensure sequential execution per user
-const userLocks = new Map();
+const userQueues = new Map(); 
 
-export const signingWorker = new Worker('signing', async (job) => {
-  const userId = job.data.userId;
-  if (!userId) throw new Error("Missing userId in job data");
+export const signingWorker = new Worker(
+  'signing',
+  async (job) => {
+    const userId = job.data.userId;
+    if (!userId) throw new Error('Missing userId in job data');
 
-  while (userLocks.get(userId)) {
-    await new Promise(resolve => setTimeout(resolve, 100));
+    if (!userQueues.has(userId)) {
+      userQueues.set(userId, new PQueue({ concurrency: 3 }));
+    }
+
+    const queue = userQueues.get(userId);
+
+    await queue.add(() => signJobHandler(job.data));
+  },
+  {
+    connection,
+    concurrency: 5, 
+    lockDuration: 60000,
+    stalledInterval: 30000,
   }
-
-  userLocks.set(userId, true);
-  try {
-    await signJobHandler(job.data);
-  } finally {
-    userLocks.delete(userId);
-  }
-
-}, {
-  connection,
-  lockDuration: 3000,
-  concurrency: 3,     
-  stalledInterval: 300
-});
-
-
+);
 
 signingWorker.on('completed', (job) => {
   console.log(`Job completed: ${job.id}`);
 });
 
 signingWorker.on('failed', (job, err) => {
-  console.error(`Job failed: ${job.id}`, err);
+  console.error(`Job failed: ${job?.id}`, err);
 });

@@ -1,5 +1,6 @@
 import * as templateServices from '../../services/templates.js';
 import * as signatureServices from '../../services/signature.js';
+import * as userServices from '../../services/users.js';
 import Court from '../../models/courts.js';
 import fs from 'fs';
 import path from 'path';
@@ -7,7 +8,7 @@ import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import ImageModule from 'docxtemplater-image-module-free';
 import QRCode from 'qrcode';
-import { signStatus, status } from '../../constants/index.js';
+import { signStatus, status, roles } from '../../constants/index.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import libre from 'libreoffice-convert';
@@ -32,10 +33,26 @@ export const signJobHandler = async ({ id, userId, signatureId, courtId }) => {
   if (!request || request.createdBy == userId) {
     throw new Error('Request not found or not authorized');
   }
-if (request.signStatus === signStatus.Signed) {
-  console.log(`Request ${id} already signed. Skipping...`);
-  return;
-}
+
+  if (request.signStatus === signStatus.Signed) {
+    console.log(`Request ${id} already signed. Skipping...`);
+    return;
+  }
+
+  const user = await userServices.findOne({ id: userId });
+  if (!user) throw new Error('User not found');
+
+  if (user.role === roles.officer && request.signStatus === signStatus.delegated) {
+    throw new Error('Officer cannot sign delegated requests');
+  }
+
+  if (user.role === roles.reader && request.signStatus !== signStatus.delegated) {
+    throw new Error('Reader can only sign delegated requests');
+  }
+
+  if (![roles.reader, roles.officer].includes(user.role)) {
+    throw new Error('You are not authorized to sign this document');
+  }
 
   const signature = await signatureServices.findOne({ id: signatureId, userId });
   if (!signature) throw new Error('Signature not found');

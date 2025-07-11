@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon index.js",
     "migrate": "node migrate.js",
-  "worker": "node app/scaling/queues/signingWorker.js"
+    "worker": "node app/scaling/queues/signingWorker.js"
   },
   "keywords": [],
   "author": "",
@@ -33,6 +33,7 @@
     "multer": "^1.4.5-lts.2",
     "nodemailer": "^6.10.0",
     "nodemon": "^3.1.9",
+    "p-queue": "^8.1.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.1.91",
     "pizzip": "^3.1.8",
