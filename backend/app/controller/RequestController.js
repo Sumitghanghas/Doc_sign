@@ -38,12 +38,11 @@ export const createRequest = async (req, res, next) => {
       url: templateFile,
       status: status.active,
       signStatus: signStatus.unsigned,
+      documentCount: 0,
       templateName: title,
       description: description || '',
       templateVariables,
-      createdBy: (req.session.userId)
-        ? new mongoose.Types.ObjectId(req.session.userId)
-        : req.session.userId,
+      createdBy: req.session.userId,
       updatedBy: req.session.userId,
       data: [],
     };
@@ -55,7 +54,7 @@ export const createRequest = async (req, res, next) => {
       title: request.templateName,
       documentCount: request.data.length,
       rejectedCount: 0,
-      createdAt: request.createdAt.toISOString(),
+      createdAt: request.createdAt.toISOString (),
       createdBy: request.createdBy.toString(),
       status: request.signStatus,
       url: request.url ? `/Uploads/templates/${file.filename}` : '',
@@ -102,7 +101,7 @@ export const getAllRequests = async (req, res, next) => {
         title: r.templateName,
         documentCount: r.data.length,
         rejectedCount: r.data.filter((d) => d.signStatus === signStatus.rejected).length,
-        createdAt: r.createdAt.toLocaleString(),
+        createdAt: r.createdAt.toISOString (),
         status: r.signStatus,
         description: r.description || '',
         rejectionReason: r.rejectionReason || '',
@@ -111,9 +110,9 @@ export const getAllRequests = async (req, res, next) => {
           id: d.id.toString(),
           name: d?.data?.name || 'Document',
           filePath: d.url,
-          uploadedAt: d.createdAt?.toLocaleString() || r.createdAt.toLocaleString(),
+          uploadedAt: d.createdAt?.toISOString () || r.createdAt.toISOString (),
           signStatus: d.signStatus,
-          signedDate: d.signedDate?.toLocaleString(),
+          signedDate: d.signedDate?.toISOString (),
           data: d.data && typeof d.data === 'object' ? d.data : {},
           rejectionReason: d.rejectionReason || '',
         })),
@@ -163,9 +162,9 @@ export const getRequestById = async (req, res, next) => {
       id: d.id.toString(),
       name: d?.data?.name || 'Document',
       filePath: d.url,
-      uploadedAt: d.createdAt?.toLocaleString() || request.createdAt.toLocaleString(),
+      uploadedAt: d.createdAt?.toISOString () || request.createdAt.toISOString (),
       signStatus: d.signStatus,
-      signedDate: d.signedDate?.toLocaleString(),
+      signedDate: d.signedDate?.toISOString (),
       data: d.data instanceof Map ? Object.fromEntries(d.data) : d.data || {},
     }));
 
@@ -174,7 +173,7 @@ export const getRequestById = async (req, res, next) => {
       title: request.templateName,
       documentCount: request.data?.length || 0,
       rejectedCount: (request.data || []).filter((d) => d.signStatus === signStatus.rejected).length,
-      createdAt: request.createdAt.toLocaleString(),
+      createdAt: request.createdAt.toISOString (),
       status: request.signStatus,
       createdBy: request.createdBy.toString(),
       url: request.url ? `/Uploads/templates/${path.basename(request.url)}` : '',
@@ -209,7 +208,7 @@ export const cloneRequest = async (req, res, next) => {
       description: request.description || '',
       templateVariables: request.templateVariables || [],
       createdBy: req.session.userId,
-      updatedBy:req.session.userId,
+      updatedBy: req.session.userId,
       data: [],
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -222,11 +221,12 @@ export const cloneRequest = async (req, res, next) => {
       title: clonedRequest.templateName,
       documentCount: clonedRequest.data.length,
       rejectedCount: 0,
-      createdAt: clonedRequest.createdAt.toISOString(),
+      createdAt: clonedRequest.createdAt.toISOString (),
+      createdBy: req.session.userId,
       status: clonedRequest.signStatus,
       description: clonedRequest.description || '',
       documents: [],
-    });
+    }); 
   } catch (error) {
     console.error('POST /api/requests/:id/clone error:', error);
     next(error);

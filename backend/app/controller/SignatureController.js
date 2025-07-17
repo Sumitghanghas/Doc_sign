@@ -6,7 +6,7 @@ import { signingQueue } from '../scaling/queues/signingQueue.js';
 // import { signJobHandler } from '../scaling/jobs/signingJobHandler.js';
 // import { Worker } from 'bullmq';
 // import IORedis from 'ioredis';
-
+ 
 export const sendForSignature = async (req, res, next) => {
     try {
         const id = req.params.id;
@@ -58,7 +58,6 @@ export const sendForSignature = async (req, res, next) => {
                 },
             }
         );
-
         return res.json({
             id: updatedTemplate.id.toString(),
             title: updatedTemplate.templateName,
@@ -67,6 +66,7 @@ export const sendForSignature = async (req, res, next) => {
             createdAt: updatedTemplate.createdAt.toISOString(),
             status: updatedTemplate.signStatus,
             description: updatedTemplate.description || '',
+            createdBy: updatedTemplate.createdBy.toString(),
             documents: updatedTemplate.data.map((dd) => ({
                 id: dd.id.toString(),
                 name: dd.data.name || 'Document',
@@ -81,13 +81,12 @@ export const sendForSignature = async (req, res, next) => {
 };
 
 
-export const signRequest = async (req, res, next) => {
+   export const signRequest = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { signatureId } = req.body;
     const userId = req.session.userId;
     const courtId = req.session.courtId;
-
 
     const job = await signingQueue.add('sign-document', {
       id,
@@ -96,10 +95,8 @@ export const signRequest = async (req, res, next) => {
       courtId,
     });
 
-    console.log('signRequest -> queue add success:', job.data);
 
     res.status(200).json({ message: 'Sign job added to queue' });
-
   } catch (error) {
     console.error('signRequest -> queue add failed:', error);
     next(error);
@@ -166,6 +163,7 @@ export const rejectRequest = async (req, res, next) => {
             status: signStatus.rejected,
             rejectionReason: rejectionReason.trim(),
             description: template.description || '',
+            createdBy: template.createdBy.toString(),
             documents: rejectedDocuments.map((d) => ({
                 id: d.id.toString(),
                 name: d.data.name || 'Document',
@@ -215,100 +213,121 @@ export const getDocumentData = async (req, res, next) => {
 };
 
 export const rejectDocument = async (req, res, next) => {
-    try {
-        const { id, documentId } = req.params;
-        const { rejectionReason } = req.body;
-        console.log('Reject document received:', { id, documentId, rejectionReason });
+  try {
+    const { id, documentId } = req.params;
+    const { rejectionReason } = req.body;
 
-        if (!rejectionReason || typeof rejectionReason !== 'string' || rejectionReason.trim().length === 0) {
-            return res.status(400).json({ error: 'Rejection reason is required and must be a non-empty string' });
-        }
-
-        const request = await templateServices.findOne({
-            id,
-            signStatus: signStatus.readForSign,
-            assignedTo: req.session.userId,
-            status: status.active,
-            'data.id': documentId,
-        });
-
-        if (!request) {
-            return res.status(404).json({ error: 'Request not found or unauthorized' });
-        }
-
-        const updatedDocument = await templateServices.updateOne(
-            {
-                id,
-                'data.id': documentId,
-            },
-            {
-                $set: {
-                    'data.$.signStatus': signStatus.rejected,
-                    'data.$.rejectionReason': rejectionReason.trim(),
-                    'data.$.rejectedDate': new Date(),
-                    updatedBy: req.session.userId,
-                    updatedAt: new Date(),
-                },
-            }
-        );
-        console.log('Updated document with rejectionReason:', updatedDocument);
-
-        return res.json({
-            message: 'Document rejected successfully',
-            documentId,
-            rejectionReason: rejectionReason.trim(),
-        });
-    } catch (error) {
-        console.error('POST /api/requests/:requestId/documents/:documentId/reject error:', error);
-        next(error);
+    if (!rejectionReason || typeof rejectionReason !== 'string' || rejectionReason.trim().length === 0) {
+      return res.status(400).json({ error: 'Rejection reason is required and must be a non-empty string' });
     }
-}
+
+    const request = await templateServices.findOne({
+      id,
+      signStatus: signStatus.readForSign,
+      assignedTo: req.session.userId,
+      status: status.active,
+      'data.id': documentId,
+    });
+
+    if (!request) {
+      return res.status(404).json({ error: 'Request not found or unauthorized' });
+    }
+
+    await templateServices.updateOne(
+      { id, 'data.id': documentId },
+      {
+        $set: {
+          'data.$.signStatus': signStatus.rejected,
+          'data.$.rejectionReason': rejectionReason.trim(),
+          'data.$.rejectedDate': new Date(),
+          updatedBy: req.session.userId,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    // const updatedTemplate = await templateServices.findOne({ id });
+    // const allRejected = updatedTemplate.data.every(d => d.signStatus === signStatus.rejected);
+
+    // if (allRejected) {
+    //   await templateServices.updateOne({ id }, { $set: { signStatus: signStatus.rejected } });
+    //   io.emit("signedRequestStatusChanged", {
+    //     id,
+    //     status: signStatus.rejected,
+    //     documentCount: updatedTemplate.data.length,
+    //   });
+    // } else {
+    //   io.emit("signedRequestStatusChanged", {
+    //     id,
+    //     status: signStatus.readForSign,
+    //     documentCount: updatedTemplate.data.length,
+    //   });
+    // }
+
+    return res.json({
+      message: 'Document rejected successfully',
+      documentId,
+      rejectionReason: rejectionReason.trim(),
+    });
+  } catch (error) {
+    console.error('POST /api/requests/:requestId/documents/:documentId/reject error:', error);
+    next(error);
+  }
+};
 
 export const delegateRequest = async (req, res, next) => {
-    try {
-        const id = req.params.id;
-        const template = await templateServices.findOne({
-            id,
-            signStatus: signStatus.readForSign,
-            assignedTo: req.session.userId,
-            status: status.active,
-        });
+  try {
+    const id = req.params.id;
 
-        if (!template) {
-            return res.status(404).json({ error: 'Request not found or unauthorized' });
-        }
+    const template = await templateServices.findOne({
+      id,
+      signStatus: signStatus.readForSign,
+      assignedTo: req.session.userId,
+      status: status.active,
+    });
 
-        const readerId = template.createdBy;
-
-        const updatedRequest = await templateServices.updateOne(
-            { id },
-            {
-                $set: {
-                    signStatus: signStatus.delegated,
-                    delegatedTo: readerId,
-                    updatedBy: req.session.userId,
-                    updatedAt: new Date(),
-                },
-            }
-        );
-
-        return res.json({
-            id: updatedRequest.id.toString(),
-            title: updatedRequest.templateName,
-            documentCount: updatedRequest.data.length,
-            rejectedCount: updatedRequest.data.filter(d => d.signStatus === signStatus.rejected).length,
-            createdAt: updatedRequest.createdAt.toISOString(),
-            status: updatedRequest.signStatus,
-            description: updatedRequest.description || '',
-            documents: updatedRequest.data.map(d => ({
-                id: d.id.toString(),
-                name: 'Document',
-                filePath: d.url,
-                uploadedAt: d.createdAt?.toISOString() || updatedRequest.createdAt.toISOString(),
-            })),
-        });
-    } catch (error) {
-        console.error('POST /api/requests/:id/delegate error:', error);
-        next(error);
+    if (!template) {
+      return res.status(404).json({ error: 'Request not found or unauthorized' });
     }
-}
+
+    const readerId = template.createdBy;
+
+    const updatedRequest = await templateServices.updateOne(
+      { id },
+      {
+        $set: {
+          signStatus: signStatus.delegated,
+          delegatedTo: readerId,
+          updatedBy: req.session.userId,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    // io.emit("signedRequestStatusChanged", {
+    //   id,
+    //   status: signStatus.delegated,
+    //   documentCount: updatedRequest.data.length,
+    // });
+
+    return res.json({
+      id: updatedRequest.id.toString(),
+      title: updatedRequest.templateName,
+      documentCount: updatedRequest.data.length,
+      rejectedCount: updatedRequest.data.filter(d => d.signStatus === signStatus.rejected).length,
+      createdAt: updatedRequest.createdAt.toISOString(),
+      status: updatedRequest.signStatus,
+      description: updatedRequest.description || '',
+      createdBy: updatedRequest.createdBy.toString(),
+      documents: updatedRequest.data.map(d => ({
+        id: d.id.toString(),
+        name: 'Document',
+        filePath: d.url,
+        uploadedAt: d.createdAt?.toISOString() || updatedRequest.createdAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('POST /api/requests/:id/delegate error:', error);
+    next(error);
+  }
+};

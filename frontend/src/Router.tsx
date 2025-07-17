@@ -63,7 +63,7 @@ export function Router() {
 					</Route>
 				</Route>
 			</Route>
-			<Route path="QRCodeData/:QRCodeDataId" element={<QRCodeData />} />
+			<Route path="document/:QRCodeDataId" element={<QRCodeData />} />
 		</Routes>
 	);
 }

@@ -14,6 +14,11 @@ export const schema = new mongoose.Schema({
     'dispatchRegisterIndex': {
         type: Number,
     },
+    documentCount: {
+        type: Number,
+        required: true,
+        default: 0,
+    },
     'status': {
         type: Number,
         required: true,

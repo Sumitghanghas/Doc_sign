@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Button, Drawer, Select, Tag, message, Form, Input, Upload, Tooltip } from "antd";
+import { Button, Drawer, Select, Tag, message, Form, Input, Upload, Tooltip, Progress } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import CustomTable from "../components/CustomTable";
 import MainAreaLayout from "../components/main-layout/main-layout";
@@ -8,6 +8,7 @@ import { requestClient, useAppStore } from "../store";
 import { AxiosError } from "axios";
 import { roles, signStatus, signStatusDisplay } from "../libs/constants";
 import { Request, Officer, Signature } from '../@types/Interfaces/requests';
+import { socket } from '../client/socket/index';
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const Requests: React.FC = () => {
@@ -17,6 +18,7 @@ const Requests: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [signingRequestId, setSigningRequestId] = useState<string | null>(null);
+  const [processingProgress, setProcessingProgress] = useState<{ [key: string]: { current: number, total: number } }>({});
   const [isSendDrawerOpen, setIsSendDrawerOpen] = useState(false);
   const [isCreateDrawerOpen, setIsCreateDrawerOpen] = useState(false);
   const [isSignDrawerOpen, setIsSignDrawerOpen] = useState(false);
@@ -35,34 +37,41 @@ const Requests: React.FC = () => {
   const fetchRequests = async () => {
     try {
       setLoading(true);
-  
+
       const data = await requestClient.getRequests();
-  
+
       const sortedRequests = (data as Request[]).sort((a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
-  
+
       const mappedData = sortedRequests.map((req: any) => ({
         ...req,
         rawStatus: req.status
           ? Number(
-              Object.keys(signStatusDisplay).find(
-                (key) =>
-                  signStatusDisplay[key as unknown as keyof typeof signStatusDisplay] === req.status
-              )
+            Object.keys(signStatusDisplay).find(
+              (key) =>
+                signStatusDisplay[key as unknown as keyof typeof signStatusDisplay] === req.status
             )
+          )
           : signStatus.unsigned,
       }));
-  
+
+        const initialProgress: { [key: string]: { current: number; total: number } } = {};
+    mappedData.forEach((req) => {
+      initialProgress[req.id] = {
+        current: 0,
+        total: req.documentCount || 0,
+      };
+    });
       setRequests(mappedData);
       setFilteredRequests(mappedData);
+      setProcessingProgress(initialProgress);
     } catch (error) {
       handleError(error, "Failed to fetch requests");
     } finally {
       setLoading(false);
     }
   };
-  
 
   const fetchOfficers = async () => {
     try {
@@ -116,8 +125,8 @@ const Requests: React.FC = () => {
       }
 
       const allowedTypes = [
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // word file extend by .docx
-        "application/msword", // word file extend by .doc
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
       ];
 
       if (!allowedTypes.includes(templateFile.type)) {
@@ -140,6 +149,48 @@ const Requests: React.FC = () => {
       setLoading(false);
     }
   };
+
+ const handleStatusChange = (data: { id: string; documentCount: any; status: number }) => {
+  console.log('Received signedRequestStatusChanged:', data);
+  if (!data || !data.id) return;
+
+  setProcessingProgress((prev) => ({
+    ...prev,
+    [data.id]: {
+      current: data.documentCount,
+      total: prev[data.id]?.total ?? data.documentCount,
+    },
+  }));
+
+    const statusLabel = signStatusDisplay[data.status as keyof typeof signStatusDisplay] || 'Unknown';
+
+    setRequests((prev) =>
+      prev.map((req) =>
+        req.id === data.id
+          ? {
+              ...req,
+              rawStatus: data.status,
+              status: statusLabel,
+              documentCount: data.documentCount,
+            }
+          : req
+      )
+    );
+
+    setFilteredRequests((prev) =>
+      prev.map((req) =>
+        req.id === data.id
+          ? {
+              ...req,
+              rawStatus: data.status,
+              status: statusLabel,
+              documentCount: data.documentCount,
+            }
+          : req
+      )
+    );
+};
+
 
   const handleSendForSignature = async () => {
     try {
@@ -195,37 +246,25 @@ const Requests: React.FC = () => {
       const values = await signForm.validateFields();
       const requestId = selectedRequest!.id;
       setSigningRequestId(requestId);
-      setRequests((pre) =>
-        pre.map((req) =>
-          req.id === requestId
-            ? {
-              ...req,
-              status: signStatusDisplay[signStatus.inProcess],
-              rawStatus: signStatus.inProcess,
-            }
-            : req
-        )
-      );
-      setFilteredRequests((pre) =>
-        pre.map((req) =>
-          req.id === requestId
-            ? {
-              ...req,
-              status: signStatusDisplay[signStatus.inProcess],
-              rawStatus: signStatus.inProcess,
-            }
-            : req
-        )
-      );
+
+      const totalDocs = selectedRequest!.documentCount;
+      setProcessingProgress(prev => ({
+        ...prev,
+        [requestId]: { current: 0, total: totalDocs }
+      }));
       await requestClient.signRequest(requestId, values.signatureId);
-      message.success("Request signed successfully!");
-      await fetchRequests();
+
       setIsSignDrawerOpen(false);
       signForm.resetFields();
       setSelectedRequest(null);
     } catch (error) {
       console.error('handleSignRequest error:', error);
       handleError(error, "Failed to sign request");
+      setProcessingProgress(prev => {
+        const newProgress = { ...prev };
+        delete newProgress[selectedRequest!.id];
+        return newProgress;
+      });
       await fetchRequests();
     } finally {
       setSigningRequestId(null);
@@ -323,15 +362,35 @@ const Requests: React.FC = () => {
     }
     message.error(fallbackMsg);
   };
-
   useEffect(() => {
     fetchRequests();
     fetchOfficers();
+
+    socket.on('connect', () => {
+      console.log('Connected to Socket.IO server');
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket.IO connection error:', error);
+    });
+
+    return () => {
+      socket.off('connect');
+      socket.off('connect_error');
+    };
   }, []);
+
+
+  useEffect(() => {
+    socket.on('signedRequestStatusChanged', handleStatusChange);
+
+    return () => {
+      socket.off('signedRequestStatusChanged', handleStatusChange);
+    };
+  }, [socket]);
 
   const getActions = (record: Request) => {
     const actions: JSX.Element[] = [];
-
 
     actions.push(
       <Button key="clone" onClick={() => handleCloneRequest(record.id)}>
@@ -345,7 +404,7 @@ const Requests: React.FC = () => {
           <Button
             key="send"
             type="primary"
-            disabled={record.documentCount === 0 || officers.length === 0}
+            disabled={officers.length === 0}
             onClick={() => {
               setSelectedRequest(record);
               setIsSendDrawerOpen(true);
@@ -378,7 +437,7 @@ const Requests: React.FC = () => {
           Sign
         </Button>
       );
-    } else if (record.rawStatus === signStatus.readForSign &&  record.createdBy !== session?.userId && !isReader) {
+    } else if (record.rawStatus === signStatus.readForSign && record.createdBy !== session?.userId && !isReader) {
       actions.push(
         <Button
           key="sign"
@@ -459,26 +518,39 @@ const Requests: React.FC = () => {
       title: "Number of Documents",
       dataIndex: "documentCount",
       key: "documentCount",
-      render: (count: number, record: Request) => (
-        <Button
-          type="link"
-          onClick={() => navigate(`/dashboard/request/${record.id}`)}
-        >
-          {count}
-        </Button>
+      render: (_: number, record: Request) => (
+        <div>
+          <Button
+            type="link"
+            onClick={() => navigate(`/dashboard/request/${record.id}`)}
+          >
+            {processingProgress[record.id].total}
+          </Button>
+          {record.rawStatus === signStatus.inProcess && processingProgress[record.id] && (
+            <div style={{ marginTop: 4 }}>
+              <Progress
+                size="small"
+                percent={processingProgress[record.id].total > 0 ?
+                  (processingProgress[record.id].current / processingProgress[record.id].total) * 100 : 0}
+                format={() => `${processingProgress[record.id].current}/${processingProgress[record.id].total}`}
+                strokeColor="#1890ff"
+              />
+            </div>
+          )}
+        </div>
       ),
     },
     {
       title: "Rejected Documents",
       dataIndex: "rejectedCount",
       key: "rejectedCount",
-      render: (count: number, record: Request) => (
+      render: (_: number, record: Request) => (
         <Button
           type="link"
           onClick={() => navigate(`/dashboard/request/${record.id}/reject`)}
-          disabled={count === 0}
+          disabled={record.rejectedCount === 0}
         >
-          {count}
+          {record.rejectedCount}
         </Button>
       ),
     },
@@ -492,10 +564,10 @@ const Requests: React.FC = () => {
       dataIndex: "status",
       key: "status",
       render: (_: string, record: Request) => {
-        const displayStatus = isReader && record.rawStatus === signStatus.Signed
+        const displayStatus = session?.userId == record.createdBy && record.rawStatus === signStatus.Signed
           ? signStatusDisplay[signStatus.readyForDispatch]
           : record.status;
-  
+
         return (
           <Tooltip
             title={
